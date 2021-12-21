@@ -109,11 +109,28 @@ def delete_database():
 
 def details():
     def open_table():
+        def search_in_table():
+            if search_item.get():
+                try:
+                    table.delete(*table.get_children())
+                    temp_rows = list()
+                    for item in cursor.execute("select * from get_{}('{}','{}')".format(table_list[subindex], db_list[index], search_item.get())):
+                        temp_rows.append(item)
+                    for row in temp_rows:
+                        table.insert('', END, values=tuple(row))
+                except:
+                     show_error("Something goes wrong", table_window)
+            else:
+                table.delete(*table.get_children())
+                for row in rows:
+                    table.insert('', END, values=tuple(row))
+                
+ 
         try:
             subindex = table_listbox.curselection()[0]
             table_window = Toplevel(details_window)
             table_window.title('{}'.format(table_list[subindex]))
-            table_window.geometry('700x400')
+            table_window.geometry('700x600')
 
             # Headings
             headings = list()
@@ -122,11 +139,21 @@ def details():
             
             # Rows
             rows = list()
-            for item in cursor.execute("select * from get_{}('{}')".format(table_list[subindex], db_list[index])):
-                rows.append(item[0])
+            for item in cursor.execute("select * from get_{}('{}','')".format(table_list[subindex], db_list[index])):
+                rows.append(item)
+
+            # Tree frame
+            tree_frame = Frame(table_window)
 
             # Treeview
-            table = ttk.Treeview(table_window, show="headings", selectmode="browse")
+            table = ttk.Treeview(master=tree_frame, show="headings", selectmode="browse", height=200)
+
+            # Scroll
+            horScroll = ttk.Scrollbar(tree_frame)
+            horScroll.configure(command=table.xview, orient=HORIZONTAL)
+            
+            # Treeview setup
+            table.configure(xscrollcommand=horScroll.set)
             table["columns"] = headings
             table["displaycolumns"] = headings
             for head in headings:
@@ -134,18 +161,56 @@ def details():
                 table.column(head, anchor=CENTER)
             for row in rows:
                 table.insert('', END, values=tuple(row))
-            #scrolltable = Scrollbar(table_window, command=table.yview)
-            #table.configure(yscrollcommand=scrolltable.set)
 
             # Buttons
-            add_data = Button(table_window, text='Add data')
-            delete_data = Button(table_window, text='Delete data')
-            alter_data = Button(table_window, text='Alter data')
+            search_button = Button(tree_frame, text='Search', command=search_in_table)
+            add_data = Button(tree_frame, text='Add data')
+            delete_data = Button(tree_frame, text='Delete data')
+            alter_data = Button(tree_frame, text='Alter data')
+
+            # Entry
+            search_item = StringVar()
+            search_enter = ttk.Entry(tree_frame, width=40)
+            if table_list[subindex] == 'divisions':
+                search_item.set('division_name')
+            elif table_list[subindex] == 'positions':
+                search_item.set('position_name')
+            elif table_list[subindex] == 'buildings':
+                search_item.set('address')
+            elif table_list[subindex] == 'employees':
+                search_item.set('employee_nam')
+            elif table_list[subindex] == 'clients':
+                search_item.set('client_name')
+            elif table_list[subindex] == 'categories':
+                search_item.set('category_name')
+            elif table_list[subindex] == 'projects':
+                search_item.set('project_name')
+            elif table_list[subindex] == 'sales':
+                search_item.set('sale_ID')
+            elif table_list[subindex] == 'finances':
+                search_item.set('fiscal_year')
+            else: 
+                 search_item.set('unknown')
+            search_enter.config(textvariable=search_item)
 
             # Places
-            #scrolltable.place(anchor=N, x=350, y=25)
-            table.place(anchor=N, x=350, y=25)
+            tree_frame.grid(column=0, row=0, sticky=N, pady=25)
+            table.grid(column=0, row=0, columnspan=3, rowspan=2, sticky=N)
+            horScroll.grid(column=0, row=3, columnspan=3, sticky=W + E)
+            search_enter.grid(column=1, row=4, sticky=N, pady=12.5, ipadx=0)
+            search_button.grid(column=1, row=5, sticky=N, pady=5, ipadx=0)
+            add_data.grid(column=1, row=6, sticky=N, pady=5, ipadx=0)
+            delete_data.grid(column=1, row=7, sticky=N, pady=5, ipadx=0)
+            alter_data.grid(column=1, row=8, sticky=N, pady=5, ipadx=0)
 
+            table_window.columnconfigure(0, weight=1)
+            table_window.rowconfigure(0, weight=1)
+            tree_frame.columnconfigure(0, weight=1)
+            tree_frame.columnconfigure(1, weight=1)
+            tree_frame.columnconfigure(2, weight=1)
+            tree_frame.columnconfigure(3, weight=1)
+            tree_frame.columnconfigure(4, weight=1)
+            tree_frame.rowconfigure(1, weight=1)
         except IndexError:
             messagebox.showerror("Error", "No items selected")
         except:
@@ -193,14 +258,14 @@ def details():
     # Buttons
     open_tbl = Button(details_window, text='Open table', command=open_table)
     clear_tbl = Button(details_window, text='Crear table', command=clear_table)
-    search_in = Button(details_window, text='Search in')
-    alter_tuple = Button(details_window, text='Alter tuple')
+    #search_in = Button(details_window, text='Search in')
+    #alter_tuple = Button(details_window, text='Alter tuple')
 
     # Places
     table_listbox.place(anchor=N, x=150, y=25)
     open_tbl.place(anchor=NW, x=250, y=25)
     clear_tbl.place(anchor=NW, x=250, y=55)
-    search_in.place(anchor=NW, x=250, y=85)
+    #search_in.place(anchor=NW, x=250, y=85)
 
 
 def clear_all_tables():
