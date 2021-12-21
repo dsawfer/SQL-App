@@ -28,7 +28,6 @@ root.geometry('400x250')
 root.title('Senku app')
 root.iconbitmap('Python-icon.ico')
 
-
 #Database list managment
 db_listbox = Listbox()
 db_list = list()
@@ -111,55 +110,94 @@ def delete_database():
 def details():
     def open_table():
         try:
-            index = db_listbox.curselection()[0]
+            subindex = table_listbox.curselection()[0]
+            table_window = Toplevel(details_window)
+            table_window.title('{}'.format(table_list[subindex]))
+            table_window.geometry('700x400')
+
+            # Headings
+            headings = list()
+            for item in cursor.execute("select * from show_table_data('{}','{}')".format(db_list[index], table_list[subindex])):
+                headings.append(item[0])
+            
+            # Rows
+            rows = list()
+            for item in cursor.execute("select * from get_{}('{}')".format(table_list[subindex], db_list[index])):
+                rows.append(item[0])
+
+            # Treeview
+            table = ttk.Treeview(table_window, show="headings", selectmode="browse")
+            table["columns"] = headings
+            table["displaycolumns"] = headings
+            for head in headings:
+                table.heading(head, text=head, anchor=CENTER)
+                table.column(head, anchor=CENTER)
+            for row in rows:
+                table.insert('', END, values=tuple(row))
+            #scrolltable = Scrollbar(table_window, command=table.yview)
+            #table.configure(yscrollcommand=scrolltable.set)
+
+            # Buttons
+            add_data = Button(table_window, text='Add data')
+            delete_data = Button(table_window, text='Delete data')
+            alter_data = Button(table_window, text='Alter data')
+
+            # Places
+            #scrolltable.place(anchor=N, x=350, y=25)
+            table.place(anchor=N, x=350, y=25)
 
         except IndexError:
             messagebox.showerror("Error", "No items selected")
+        except:
+            show_error("Error while opening database '{}'".format(db_list[index]), details_window)
+
 
     def clear_table():
         try:
-            subindex = data_listbox.curselection()[0]
+            subindex = table_listbox.curselection()[0]
             if index == 0:
                 messagebox.showerror("Error", "Unable to clear 'mother' database")
                 return
-            query = '''select clear_table('{}', '{}')'''.format(db_list[index], data_list[subindex])
+            query = '''select clear_table('{}', '{}')'''.format(db_list[index], table_list[subindex])
             cursor.execute(query)
         except IndexError:
             messagebox.showerror("Error", "No items selected")
         else:
-            messagebox.showinfo("Success", "Table '{}' from database '{}' was cleaned up successfully".format(data_list[subindex], db_list[index]))
-            print("DEBUG:: Clear all rows table '{}' in database with name - {}".format(data_list[subindex], db_list[index]))
+            messagebox.showinfo("Success", "Table '{}' from database '{}' was cleaned up successfully".format(table_list[subindex], db_list[index]))
+            print("DEBUG:: Clear all rows table '{}' in database with name - {}".format(table_list[subindex], db_list[index]))
 
     
     try:
         index = db_listbox.curselection()[0]
-        newWindow = Toplevel(root)
-        newWindow.title('{}'.format(db_list[index]))
-        newWindow.geometry('400x250')
+        if index == 0:
+            messagebox.showerror("Error", "No rights to view the database")
+            return
+        details_window = Toplevel(root)
+        details_window.title('{}'.format(db_list[index]))
+        details_window.geometry('400x250')
 
         # ListBox
-        data_listbox = Listbox(newWindow)
-        data_list = list()
+        table_listbox = Listbox(details_window)
+        table_list = list()
         for item in cursor.execute("select * from show_tables('{}');".format(db_list[index])):
-            data_list.append(item[0])
-        for item in data_list:
-            data_listbox.insert(END, item)
-        #data_listbox.bind('<<ListboxSelect>>', on_change)
+            table_list.append(item[0])
+        for item in table_list:
+            table_listbox.insert(END, item)
+        #table_listbox.bind('<<ListboxSelect>>', on_change)
     except IndexError:
         messagebox.showerror("Error", "No items selected")
     except:
-        show_error("Error while opening database '{}'".format(db_list[index]), newWindow)
+        show_error("Error while opening database '{}'".format(db_list[index]), details_window)
 
 
     # Buttons
-    open_tbl = Button(newWindow, text='Open table')
-    clear_tbl = Button(newWindow, text='Crear table', command=clear_table)
-    search_in = Button(newWindow, text='Search in')
-    alter_tuple = Button(newWindow, text='Alter tuple')
+    open_tbl = Button(details_window, text='Open table', command=open_table)
+    clear_tbl = Button(details_window, text='Crear table', command=clear_table)
+    search_in = Button(details_window, text='Search in')
+    alter_tuple = Button(details_window, text='Alter tuple')
 
     # Places
-    data_listbox.place(anchor=N, x=150, y=25)
-
+    table_listbox.place(anchor=N, x=150, y=25)
     open_tbl.place(anchor=NW, x=250, y=25)
     clear_tbl.place(anchor=NW, x=250, y=55)
     search_in.place(anchor=NW, x=250, y=85)
@@ -184,7 +222,7 @@ create_db = Button(text='Create database', command=create_database)
 select_db = Button(text='Select database', command=select_database)
 delete_db = Button(text='Delete database', command=delete_database)
 detail_db = Button(text='Details',         command=details)
-clear_db =  Button(text='Clear tables',    command=clear_all_tables)
+clear_db =  Button(text='Clear database',  command=clear_all_tables)
 
 
 db_listbox.place(anchor=N, x=150, y=25)
@@ -196,20 +234,3 @@ clear_db.place(anchor=NW, x=250, y=145)
 
 
 root.mainloop()
-
-
-
-
-
-
-
-
-
-
-
-    #def on_change(event):
-    #    widget = event.widget
-    #    selection = widget.curselection()
-    #    if selection:
-    #        text = widget.get(selection[0])
-    #       tree.place(anchor=NW, x=50, y=25)
