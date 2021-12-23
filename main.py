@@ -163,6 +163,9 @@ def details():
                     except:
                         messagebox.showerror("Error", "Error while additing rows")
         
+                if table_list[subindex] == 'finances':
+                    messagebox.showerror("Error", "No rights to add data to this table ({})".format(table_list[subindex]))
+                    return
 
                 # Window setup
                 add_window = Toplevel(table_window)
@@ -176,7 +179,7 @@ def details():
                 for item in range(len(headings)):
                     text_variables.append(StringVar())
                     entry_list.append(Entry(add_window, textvariable=text_variables[item]))
-                    labels_list.append(Label(add_window, text=headings[item]))
+                    labels_list.append(Label(add_window, text='{} ({})'.format(headings[item], types[item])))
 
                 # Buttons
                 add_current_data = Button(add_window, text='Add data', command=add_data_to_db)
@@ -208,7 +211,10 @@ def details():
                     refresh_table()
                     update_window.destroy()
         
-
+                if table_list[subindex] == 'finances':
+                    messagebox.showerror("Error", "No rights to update data in this table ({})".format(table_list[subindex]))
+                    return
+                
                 # Window setup
                 update_window = Toplevel(table_window)
                 update_window.title('{}'.format(table_list[subindex]))
@@ -222,7 +228,7 @@ def details():
                 for item in range(len(headings)):
                     text_variables.append(StringVar(update_window, data[item]))
                     entry_list.append(Entry(update_window, textvariable=text_variables[item]))
-                    labels_list.append(Label(update_window, text=headings[item]))
+                    labels_list.append(Label(update_window, text='{} ({})'.format(headings[item], types[item])))
 
                 # Buttons
                 add_current_data = Button(update_window, text='Update data', command=update_data_in_db)
@@ -252,8 +258,14 @@ def details():
 
             # Headings
             headings = list()
-            for item in cursor.execute("select * from show_table_data('{}','{}')".format(db_list[index], table_list[subindex])):
-                headings.append(item[0])
+            types = list()
+            if table_list[subindex] == 'projects':
+                headings = ['project_ID', 'project_category', 'project_name', 'project_dev', 'project_release_date', 'project_cost']
+                types = ['integer', 'varchar', 'text', 'varchar', 'date', 'integer']
+            else:
+                for item in cursor.execute("select * from show_table_data('{}','{}')".format(db_list[index], table_list[subindex])):
+                    headings.append(item[0])
+                    types.append(item[1])
             
             # Rows
             rows = list()
@@ -338,8 +350,8 @@ def details():
     def clear_table():
         try:
             subindex = table_listbox.curselection()[0]
-            if index == 0:
-                messagebox.showerror("Error", "Unable to clear 'mother' database")
+            if table_list[subindex] == 'finances':
+                messagebox.showerror("Error", "Auto-filled table, you do not have permission to clear'")
                 return
             query = '''select clear_table('{}', '{}')'''.format(db_list[index], table_list[subindex])
             cursor.execute(query)
@@ -410,10 +422,10 @@ clear_db =  Button(text='Clear database',  command=clear_all_tables)
 
 db_listbox.place(anchor=N, x=150, y=25)
 create_db.place(anchor=NW, x=250, y=25)
-select_db.place(anchor=NW, x=250, y=55)
-delete_db.place(anchor=NW, x=250, y=85)
-detail_db.place(anchor=NW, x=250, y=115)
-clear_db.place(anchor=NW, x=250, y=145)
+# select_db.place(anchor=NW, x=250, y=55)
+delete_db.place(anchor=NW, x=250, y=55)
+detail_db.place(anchor=NW, x=250, y=85)
+clear_db.place(anchor=NW, x=250, y=115)
 
 
 root.mainloop()
