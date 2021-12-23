@@ -104,7 +104,7 @@ def delete_database():
         messagebox.showerror("Error", "Delete error")
         print("DEBUG:: Error deleting database with name - {}".format(db_list[index]))
     else:
-        messagebox.showinfo("Success", "'{}' database was successfully deleted".format(db_list[index]))
+        messagebox.showinfo("Success", "Successfully deleted")
 
 
 def details():
