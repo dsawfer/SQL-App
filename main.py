@@ -59,6 +59,7 @@ def create_database():
     create_window = Toplevel(root)
     create_window.title('Create new database')
     create_window.geometry('250x150')
+    create_window.iconbitmap('Python-icon.ico')
 
     name = StringVar()
     title = Label(create_window, text='Enter database name')
@@ -171,6 +172,7 @@ def details():
                 add_window = Toplevel(table_window)
                 add_window.title('{}'.format(table_list[subindex]))
                 add_window.geometry('300x350')
+                add_window.iconbitmap('Python-icon.ico')
 
                 # Entry
                 entry_list = list()
@@ -219,6 +221,7 @@ def details():
                 update_window = Toplevel(table_window)
                 update_window.title('{}'.format(table_list[subindex]))
                 update_window.geometry('300x350')
+                update_window.iconbitmap('Python-icon.ico')
 
                 # Entry
                 data =  table.item(table.selection()[0])['values']
@@ -255,6 +258,7 @@ def details():
             table_window = Toplevel(details_window)
             table_window.title('{}'.format(table_list[subindex]))
             table_window.geometry('700x600')
+            table_window.iconbitmap('Python-icon.ico')
 
             # Headings
             headings = list()
@@ -370,6 +374,7 @@ def details():
         details_window = Toplevel(root)
         details_window.title('{}'.format(db_list[index]))
         details_window.geometry('400x250')
+        details_window.iconbitmap('Python-icon.ico')
 
         # ListBox
         table_listbox = Listbox(details_window)
