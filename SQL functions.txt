@@ -1,5 +1,3 @@
---DROP FUNCTION create_db(text);
-
 CREATE OR REPLACE FUNCTION create_db(dbname text)
      RETURNS void AS
 $func$
