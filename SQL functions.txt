@@ -1,0 +1,592 @@
+--DROP FUNCTION create_db(text);
+
+CREATE OR REPLACE FUNCTION create_db(dbname text)
+     RETURNS void AS
+$func$
+BEGIN
+IF EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+     RAISE NOTICE 'Database already exists';
+ELSE
+    PERFORM
+    dblink_connect('mother_data_base', 'dbname=project_db  hostaddr=127.0.0.1 port=5432 user=pr_user password=1234'),
+    dblink_exec('mother_data_base', 'CREATE DATABASE ' || quote_ident(dbname)),
+    dblink_connect('new_data_base', 'dbname=' || quote_ident(dbname) ||
+        ' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234'),
+    dblink_exec('new_data_base', 'CREATE TABLE IF NOT EXISTS divisions(
+    division_code varchar(4) PRIMARY KEY NOT NULL,
+    division_name text NOT NULL
+    );'),
+    dblink_exec('new_data_base', 'CREATE TABLE IF NOT EXISTS positions(
+    position_code varchar(6) PRIMARY KEY NOT NULL,
+    position_name text NOT NULL,
+    salary numeric (6, 0) NOT NULL
+    );'),
+    dblink_exec('new_data_base', 'CREATE TABLE IF NOT EXISTS buildings(
+    building_code varchar(3) PRIMARY KEY NOT NULL,
+    address text NOT NULL,
+    type_of_property varchar(4) NOT NULL CHECK (type_of_property IN (''own'', ''rent''))
+    );'),
+    dblink_exec('new_data_base', 'CREATE TABLE IF NOT EXISTS employees (
+    employee_ID serial PRIMARY KEY NOT NULL,
+    employee_name text NOT NULL,
+    employee_position varchar (6) references positions(position_code) ON DELETE CASCADE,
+    employee_division varchar (4) references divisions(division_code) ON DELETE CASCADE,
+    employee_building varchar (3) references buildings(building_code) ON DELETE CASCADE
+    );'),
+    dblink_exec('new_data_base', 'CREATE TABLE IF NOT EXISTS clients (
+    client_ID serial PRIMARY KEY NOT NULL,
+    client_name text NOT NULL
+    );'),
+    dblink_exec('new_data_base', 'CREATE TABLE IF NOT EXISTS categories (
+    category_code varchar(6) PRIMARY KEY NOT NULL,
+    category_name text NOT NULL
+    );'),
+    dblink_exec('new_data_base', 'CREATE TABLE IF NOT EXISTS projects (
+    project_ID serial PRIMARY KEY NOT NULL,
+    project_category varchar(6) references categories(category_code) ON DELETE CASCADE,
+    project_name text NOT NULL,
+    project_dev varchar(4) references divisions(division_code) ON DELETE CASCADE,
+    project_release_date date,
+    project_cost integer CHECK (project_cost > 0)
+    );'),
+    dblink_exec('new_data_base', 'CREATE TABLE IF NOT EXISTS sales (
+    sale_ID serial PRIMARY KEY NOT NULL,
+    sale_date date,
+    sale_product_ID integer references projects(project_ID) ON DELETE CASCADE,
+    sale_customer integer references clients(client_ID) ON DELETE CASCADE,
+    sale_income integer CHECK (sale_income > 0)
+    );'),
+    dblink_exec('new_data_base', 'CREATE TABLE IF NOT EXISTS finances (
+    fiscal_year numeric(4, 0) PRIMARY KEY NOT NULL,
+    expenses integer NOT NULL,
+    income integer NOT NULL,
+    total_amount integer NOT NULL
+    );'),
+    dblink_exec('new_data_base', 'CREATE OR REPLACE FUNCTION public.tf_sales ()
+        RETURNS trigger
+        LANGUAGE ''plpgsql''
+        VOLATILE
+        COST 100
+        AS $BODY$
+        begin
+        if (TG_OP = ''INSERT'') then
+            if ((extract(year from new.sale_date)) not in (select fiscal_year from finances)) then
+                insert into finances(fiscal_year, expenses, income, total_amount) select extract(year from new.sale_date), 0, 0, 0;
+                end if;
+            update finances set income=income + new.sale_income, total_amount=income - expenses where (extract(year from new.sale_date) = fiscal_year);
+            elsif (TG_OP = ''UPDATE'') then
+                update finances set income=income - old.sale_income + new.sale_income, total_amount=total_amount - old.sale_income + new.sale_income where (extract(year from new.sale_date) = fiscal_year);
+            elsif (TG_OP = ''DELETE'') then
+                update finances set income=income - old.sale_income, total_amount=income - expenses where (extract(year from old.sale_date) = fiscal_year);
+            end if;
+        return null;
+        end
+        $BODY$;'),
+    dblink_exec('new_data_base', 'CREATE TRIGGER tg_sales
+    AFTER INSERT OR DELETE OR UPDATE
+    ON public.sales
+    FOR EACH ROW
+    EXECUTE FUNCTION public.tf_sales();'),
+    dblink_exec('new_data_base', 'CREATE OR REPLACE FUNCTION public.tf_projects ()
+        RETURNS trigger
+        LANGUAGE ''plpgsql''
+        VOLATILE
+        COST 100
+        AS $BODY$
+        begin
+        if (TG_OP = ''INSERT'') then
+            if ((extract(year from new.project_release_date)) not in (select fiscal_year from finances)) then
+                insert into finances(fiscal_year, expenses, income, total_amount) select extract(year from new.project_release_date), 0, 0, 0;
+                end if;
+            update finances set expenses=expenses + new.project_cost, total_amount=income - expenses where (extract(year from new.project_release_date) = fiscal_year);
+            elsif (TG_OP = ''UPDATE'') then
+                update finances set expenses=expenses - old.project_cost + new.project_cost, total_amount=total_amount + old.project_cost - new.project_cost where (extract(year from new.project_release_date) = fiscal_year);
+            elsif (TG_OP = ''DELETE'') then
+                update finances set expenses=expenses - old.project_cost, total_amount=income - expenses where (extract(year from old.project_release_date) = fiscal_year);
+            end if;
+        return null;
+        end
+        $BODY$;'),
+    dblink_exec('new_data_base', 'CREATE TRIGGER tg_projects
+    AFTER INSERT OR DELETE OR UPDATE
+    ON public.projects
+    FOR EACH ROW
+    EXECUTE FUNCTION public.tf_projects();'),
+    dblink_exec('new_data_base', 'CREATE INDEX index_employee_name
+    ON public.employees USING btree
+    (employee_name text_pattern_ops ASC NULLS LAST);'),
+    dblink_exec('new_data_base', 'SET ENABLE_SEQSCAN = OFF;'),
+    dblink_exec('mother_data_base', 'INSERT INTO databases VALUES (''' || quote_ident(dbname) || ''');'),
+    dblink_disconnect('mother_data_base'),
+    dblink_disconnect('new_data_base');
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION delete_db(dbname text)
+  RETURNS void AS
+$func$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSE
+   PERFORM
+   dblink_connect('mother_data_base', 'dbname=project_db  hostaddr=127.0.0.1 port=5432 user=pr_user password=1234'),
+   dblink_exec('mother_data_base', 'DROP DATABASE ' || quote_ident(dbname)),
+   dblink_exec('mother_data_base', 'DELETE FROM databases WHERE name = ''' || quote_ident(dbname) ||''';'),
+   dblink_disconnect('mother_data_base');
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION show_tables(dbname text)
+  RETURNS TABLE(name varchar) AS
+$func$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSE
+    RETURN QUERY
+    SELECT * FROM dblink('dbname=' || quote_ident(dbname) ||
+        ' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT table_name FROM information_schema.tables WHERE table_schema = ''public'' ORDER BY table_name;')
+        AS f(name varchar);
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION clear_table(dbname text, tablename text)
+  RETURNS void AS
+$func$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSE
+    PERFORM
+    dblink_connect('other_data_base', 'dbname=' || quote_ident(dbname) ||
+        ' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234'),
+    ---dblink_exec('other_data_base', 'TRUNCATE ' || quote_ident(tablename)) || ' CASCADE;',
+    dblink_exec('other_data_base', 'DELETE FROM ' || quote_ident(tablename)),
+    dblink_disconnect('other_data_base');
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION clear_all_table(dbname text)
+  RETURNS void AS
+$func$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSE
+    PERFORM
+    dblink_connect('other_data_base', 'dbname=' || quote_ident(dbname) ||
+        ' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234'),
+    ---dblink_exec('other_data_base', 'TRUNCATE ' || quote_ident(tablename)) || ' CASCADE;',
+    dblink_exec('other_data_base', 'DELETE FROM employees'),
+    dblink_exec('other_data_base', 'DELETE FROM sales'),
+    dblink_exec('other_data_base', 'DELETE FROM projects'),
+    dblink_exec('other_data_base', 'DELETE FROM buildings'),
+    dblink_exec('other_data_base', 'DELETE FROM categories'),
+    dblink_exec('other_data_base', 'DELETE FROM clients'),
+    dblink_exec('other_data_base', 'DELETE FROM divisions'),
+    dblink_exec('other_data_base', 'DELETE FROM finances'),
+    dblink_exec('other_data_base', 'DELETE FROM positions'),
+    dblink_disconnect('other_data_base');
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION show_table_data(dbname text, tablename text)
+  RETURNS TABLE(name varchar, type varchar) AS
+$func$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSE
+    RETURN QUERY
+    SELECT * FROM dblink('dbname=' || quote_ident(dbname) ||
+        ' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_name = ''' || quote_ident(tablename) ||''';')
+        AS f(name varchar, type varchar);
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION get_rows(dbname text, tablename text)
+  RETURNS SETOF databases AS
+$func$
+    DECLARE query text;
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSE
+    query = 'SELECT * FROM databases WHERE name = ''' || quote_ident(tablename) ||''';';
+    RAISE NOTICE '%', query;
+    RAISE NOTICE 'tablename = %', tablename;
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM databases WHERE name = ''' || quote_ident(tablename) ||''';') AS f(name varchar(15));
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION get_divisions(dbname text, sname text)
+  RETURNS SETOF divisions AS
+$func$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSIF NOT sname = '' THEN
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM divisions WHERE division_name = ' || quote_literal(sname) ||';') AS f(code varchar(4), name text);
+ELSE
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM divisions') AS f(code varchar(4), name text);
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION get_positions(dbname text, sname text)
+  RETURNS SETOF positions AS
+$func$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSIF NOT sname = '' THEN
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM positions WHERE position_name = ' || quote_literal(sname) ||';') AS f(position_code varchar(6), position_name text, salary numeric (6, 0));
+ELSE
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM positions') AS f(position_code varchar(6), position_name text, salary numeric (6, 0));
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION get_buildings(dbname text, sname text)
+  RETURNS SETOF buildings AS
+$func$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSIF NOT sname = '' THEN
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM buildings WHERE address = ' || quote_literal(sname) ||';') AS f(building_code varchar(3), address text, type_of_property varchar(4));
+ELSE
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM buildings') AS f(building_code varchar(3), address text, type_of_property varchar(4));
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION get_employees(dbname text, sname text)
+  RETURNS SETOF employees AS
+$func$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSIF NOT sname = '' THEN
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM employees WHERE employee_name = ' || quote_literal(sname) ||';') AS f(employee_ID integer, employee_name text, employee_position varchar(6), employee_division varchar(4), employee_building varchar(3));
+ELSE
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM employees') AS f(employee_ID integer, employee_name text, employee_position varchar(6), employee_division varchar(4), employee_building varchar(3));
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION get_clients(dbname text, sname text)
+  RETURNS SETOF clients AS
+$func$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSIF NOT sname = '' THEN
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM clients WHERE client_name = ' || quote_literal(sname) ||';') AS f(client_ID integer, client_name text);
+ELSE
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM clients') AS f(client_ID integer, client_name text);
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION get_categories(dbname text, sname text)
+  RETURNS SETOF categories AS
+$func$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSIF NOT sname = '' THEN
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM categories WHERE category_name = ' || quote_literal(sname) ||';') AS f(category_code varchar(6), category_name text);
+ELSE
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM categories') AS f(category_code varchar(6), category_name text);
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION get_projects(dbname text, sname text)
+  RETURNS SETOF projects AS
+$func$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSIF NOT sname = '' THEN
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM projects WHERE project_name = ' || quote_literal(sname) ||';') AS f(project_ID integer, project_category varchar(6), project_name text, project_dev varchar(4), project_release_date date, project_cost integer);
+ELSE
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM projects') AS f(project_ID integer, project_category varchar(6), project_name text, project_dev varchar(4), project_release_date date, project_cost integer);
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION get_sales(dbname text, sname text)
+  RETURNS SETOF sales AS
+$func$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSIF NOT sname = '' THEN
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM sales WHERE sale_ID = ' || quote_literal(sname) ||';') AS f(sale_ID integer, sale_date date, sale_product_ID integer, sale_customer integer, sale_income integer);
+ELSE
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM sales') AS f(sale_ID integer, sale_date date, sale_product_ID integer, sale_customer integer, sale_income integer);
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION get_finances(dbname text, sname text)
+  RETURNS SETOF finances AS
+$func$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSIF NOT sname = '' THEN
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM finances WHERE fiscal_year = ' || quote_literal(sname) ||';') AS f(fiscal_year numeric(4, 0), expenses integer, income integer, total_amount integer);
+ELSE
+    RETURN QUERY
+        SELECT * FROM dblink('dbname='|| quote_ident(dbname) ||' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234',
+        'SELECT * FROM finances') AS f(fiscal_year numeric(4, 0), expenses integer, income integer, total_amount integer);
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION delete_rows(dbname text, tablename text, condition_for_deletion text)
+  RETURNS void AS
+$func$
+    DECLARE query text;
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSE
+    query = 'DELETE FROM ' || quote_ident(tablename) || ' WHERE project_ID = ' || quote_literal(condition_for_deletion);
+    RAISE NOTICE '%', query;
+    PERFORM
+    dblink_connect('other_data_base', 'dbname=' || quote_ident(dbname) ||
+        ' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234');
+    --- DIVISIONS
+    IF tablename = 'divisions' THEN
+        PERFORM
+        dblink_exec('other_data_base', 'DELETE FROM ' || quote_ident(tablename) || ' WHERE division_code = ' || quote_literal(condition_for_deletion) ||';'),
+        dblink_disconnect('other_data_base');
+    --- POSITIONS
+    ELSIF tablename = 'positions' THEN
+        PERFORM
+        dblink_exec('other_data_base', 'DELETE FROM ' || quote_ident(tablename) || ' WHERE position_code = ' || quote_literal(condition_for_deletion) ||';'),
+        dblink_disconnect('other_data_base');
+    --- BUILDINGS
+    ELSIF tablename = 'buildings' THEN
+        PERFORM
+        dblink_exec('other_data_base', 'DELETE FROM ' || quote_ident(tablename) || ' WHERE building_code = ' || quote_literal(condition_for_deletion) ||';'),
+        dblink_disconnect('other_data_base');
+    --- EMPLOYEES
+    ELSIF tablename = 'employees' THEN
+        PERFORM
+        dblink_exec('other_data_base', 'DELETE FROM ' || quote_ident(tablename) || ' WHERE employee_ID = ' || quote_literal(condition_for_deletion) ||';'),
+        dblink_disconnect('other_data_base');
+    --- CLIENTS
+    ELSIF tablename = 'clients' THEN
+        PERFORM
+        dblink_exec('other_data_base', 'DELETE FROM ' || quote_ident(tablename) || ' WHERE client_ID = ' || quote_literal(condition_for_deletion) ||';'),
+        dblink_disconnect('other_data_base');
+    --- CATEGORIES
+    ELSIF tablename = 'categories' THEN
+        PERFORM
+        dblink_exec('other_data_base', 'DELETE FROM ' || quote_ident(tablename) || ' WHERE category_code = ' || quote_literal(condition_for_deletion) ||';'),
+        dblink_disconnect('other_data_base');
+    --- PROJECTS
+    ELSIF tablename = 'projects' THEN
+        PERFORM
+        dblink_exec('other_data_base', 'DELETE FROM ' || quote_ident(tablename) || ' WHERE project_ID = ' || quote_literal(condition_for_deletion) ||';'),
+        dblink_disconnect('other_data_base');
+    --- SALES
+    ELSIF tablename = 'sales' THEN
+        PERFORM
+        dblink_exec('other_data_base', 'DELETE FROM ' || quote_ident(tablename) || ' WHERE sale_ID = ' || quote_literal(condition_for_deletion) ||';'),
+        dblink_disconnect('other_data_base');
+    END IF;
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION insert_rows(dbname text, tablename text, insertion_rows text[])
+  RETURNS void AS
+$func$
+    DECLARE query text;
+    DECLARE t text;
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSE
+    query = 'INSERT INTO ' || quote_ident(tablename) || ' VALUES (';
+    FOREACH t IN ARRAY insertion_rows LOOP
+        query := query || t || ',';
+        END LOOP;
+    query := regexp_replace(query, '.$', '');
+    query := query || ');';
+    RAISE NOTICE '%', query;
+    PERFORM
+    dblink_connect('other_data_base', 'dbname=' || quote_ident(dbname) ||
+        ' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234'),
+    dblink_exec('other_data_base', query),
+    dblink_disconnect('other_data_base');
+
+END IF;
+END
+$func$ LANGUAGE plpgsql;
+
+
+
+CREATE OR REPLACE FUNCTION update_rows(dbname text, tablename text, pkey text, update_data text[])
+  RETURNS void AS
+$func$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = dbname) THEN
+   RAISE NOTICE 'Database doesn''t exists';
+ELSE
+    PERFORM
+    dblink_connect('other_data_base', 'dbname=' || quote_ident(dbname) ||
+        ' hostaddr=127.0.0.1 port=5432 user=pr_user password=1234');
+    --- DIVISIONS
+    IF tablename = 'divisions' THEN
+        PERFORM
+        dblink_exec('other_data_base', 'UPDATE ' || quote_ident(tablename) || ' SET division_code = ' || quote_literal(update_data[1]) ||', ' ||
+                                       'division_name = '|| quote_literal(update_data[2]) ||
+                                       'WHERE division_code = '|| quote_literal(pkey) || ';'),
+        dblink_disconnect('other_data_base');
+    --- POSITIONS
+    ELSIF tablename = 'positions' THEN
+        PERFORM
+        dblink_exec('other_data_base', 'UPDATE ' || quote_ident(tablename) || ' SET position_name = '|| quote_literal(update_data[1]) || ', ' ||
+                                       'salary = ' || quote_literal(update_data[2]) ||
+                                       'WHERE position_code = '|| quote_literal(pkey) || ';'),
+        dblink_disconnect('other_data_base');
+    --- BUILDINGS
+    ELSIF tablename = 'buildings' THEN
+        PERFORM
+        dblink_exec('other_data_base', 'UPDATE ' || quote_ident(tablename) || ' SET address = '|| quote_literal(update_data[1]) || ', ' ||
+                                       'type_of_property = ' || quote_literal(update_data[2]) ||
+                                       'WHERE building_code = '|| quote_literal(pkey) || ';'),
+        dblink_disconnect('other_data_base');
+    --- EMPLOYEES
+    ELSIF tablename = 'employees' THEN
+        PERFORM
+        dblink_exec('other_data_base', 'UPDATE ' || quote_ident(tablename) || ' SET employee_name = '|| quote_literal(update_data[1]) || ', ' ||
+                                       'employee_position = ' || quote_literal(update_data[2]) || ', ' ||
+                                       'employee_division = ' || quote_literal(update_data[3]) || ', ' ||
+                                       'employee_building = ' || quote_literal(update_data[4]) ||
+                                       'WHERE employee_ID = '|| quote_literal(pkey) || ';'),
+        dblink_disconnect('other_data_base');
+    --- CLIENTS
+    ELSIF tablename = 'clients' THEN
+        PERFORM
+        dblink_exec('other_data_base', 'UPDATE ' || quote_ident(tablename) || ' SET client_name = '|| quote_literal(update_data[1]) ||
+                                       'WHERE client_ID = '|| quote_literal(pkey) || ';'),
+        dblink_disconnect('other_data_base');
+    --- CATEGORIES
+    ELSIF tablename = 'categories' THEN
+        PERFORM
+        dblink_exec('other_data_base', 'UPDATE ' || quote_ident(tablename) || ' SET category_name = '|| quote_literal(update_data[1]) ||
+                                       'WHERE category_code = '|| quote_literal(pkey) || ';'),
+        dblink_disconnect('other_data_base');
+     --- PROJECTS
+    ELSIF tablename = 'projects' THEN
+        PERFORM
+        dblink_exec('other_data_base', 'UPDATE ' || quote_ident(tablename) || ' SET project_category = '|| quote_literal(update_data[1]) || ', ' ||
+                                       'project_name = ' || quote_literal(update_data[2]) || ', ' ||
+                                       'project_dev = ' || quote_literal(update_data[3]) || ', ' ||
+                                       'project_release_date = ' || quote_literal(update_data[4]) || ', ' ||
+                                       'project_cost = ' || quote_literal(update_data[5]) ||
+                                       'WHERE project_ID = '|| quote_literal(pkey) || ';'),
+        dblink_disconnect('other_data_base');
+         --- SALES
+    ELSIF tablename = 'sales' THEN
+        PERFORM
+        dblink_exec('other_data_base', 'UPDATE ' || quote_ident(tablename) || ' SET sale_date = '|| quote_literal(update_data[1]) || ', ' ||
+                                       'sale_product_ID = ' || quote_literal(update_data[2]) || ', ' ||
+                                       'sale_customer = ' || quote_literal(update_data[3]) || ', ' ||
+                                       'sale_income = ' || quote_literal(update_data[4]) ||
+                                       'WHERE sale_ID = '|| quote_literal(pkey) || ';'),
+        dblink_disconnect('other_data_base');
+    END IF;
+END IF;
+END
+$func$ LANGUAGE plpgsql;
